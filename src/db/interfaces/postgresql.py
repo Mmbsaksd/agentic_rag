@@ -4,7 +4,6 @@ import socket
 from contextlib import contextmanager
 from typing import Generator, Optional
 
-
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
@@ -24,7 +23,6 @@ def _force_ipv4_connect_arg(url: str) -> dict:
     not routed but DNS still returns AAAA records.
     """
     match = re.search(r"@([^/:@?]+)", url)
-
     if not match:
         return {}
     host = match.group(1)
@@ -41,6 +39,7 @@ def _force_ipv4_connect_arg(url: str) -> dict:
 
 Base = declarative_base()
 
+
 class PostgreSQLDatabase(BaseDatabase):
     """PostgreSQL database implementation."""
 
@@ -49,7 +48,6 @@ class PostgreSQLDatabase(BaseDatabase):
         self.engine: Optional[Engine] = None
         self.session_factory: Optional[sessionmaker] = None
 
-        
     def startup(self) -> None:
         """Initialize the database connection."""
         try:
@@ -62,6 +60,8 @@ class PostgreSQLDatabase(BaseDatabase):
             url = self.config.database_url
             if "neon.tech" in url or "sslmode=require" in url:
                 connect_args["sslmode"] = "require"
+                # Force IPv4 — psycopg2 uses hostaddr for the TCP connection
+                # and host for SSL SNI, so both IPv4 routing and SSL work correctly
                 connect_args.update(_force_ipv4_connect_arg(url))
 
             self.engine = create_engine(
@@ -75,8 +75,11 @@ class PostgreSQLDatabase(BaseDatabase):
 
             self.session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
 
-            inspector = inspect(self.engine)
-            existing_tables = inspector.get_table_names()
+            # Test the connection
+            assert self.engine is not None
+            with self.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+                logger.info("Database connection test successful")
 
             # Check which tables exist before creating
             inspector = inspect(self.engine)
@@ -109,7 +112,6 @@ class PostgreSQLDatabase(BaseDatabase):
         if self.engine:
             self.engine.dispose()
             logger.info("PostgreSQL database connections closed")
-
 
     @contextmanager
     def get_session(self) -> Generator[Session, None, None]:
